@@ -1,0 +1,91 @@
+# Funzione per verificare se un programma è installato (registro o presenza file)
+function Is-SoftwareInstalled {
+    param (
+        [string]$softwareName,
+        [array]$exePaths  # Array di percorsi opzionali per verificare se l'eseguibile esiste
+    )
+
+    # Verifica nel registro di sistema (installazione per tutti gli utenti)
+    $installed = Get-ItemProperty "HKLM:\Software\Microsoft\Windows\CurrentVersion\Uninstall\*" -ErrorAction SilentlyContinue |
+        Where-Object { $_.DisplayName -like "*$softwareName*" }
+
+    if (!$installed) {
+        # Verifica nel registro di sistema (installazione per utente corrente)
+        $installed = Get-ItemProperty "HKCU:\Software\Microsoft\Windows\CurrentVersion\Uninstall\*" -ErrorAction SilentlyContinue |
+            Where-Object { $_.DisplayName -like "*$softwareName*" }
+    }
+
+    # Se il software è installato nel registro
+    if ($installed) {
+        Write-Host "$softwareName è già installato (registro)."
+        return $true
+    }
+
+    # Verifica se uno dei file eseguibili esiste
+    foreach ($exePath in $exePaths) {
+        if (Test-Path $exePath) {
+            Write-Host "$softwareName è già installato (eseguibile trovato a $exePath)."
+            return $true
+        }
+    }
+
+    return $false
+}
+
+# Funzione per scaricare e installare un software da un URL
+function Install-Software {
+    param (
+        [string]$url,
+        [string]$installerName,
+        [string]$softwareName,
+        [array]$exePaths  # Array di percorsi dell'eseguibile per il controllo
+    )
+
+    # Verifica se il software è già installato
+    if (Is-SoftwareInstalled -softwareName $softwareName -exePaths $exePaths) {
+        return
+    }
+
+    # Percorso per salvare l'installer
+    $installerPath = "$env:TEMP\$installerName"
+
+    # Scarica l'installer
+    Write-Host "Scaricando $installerName da $url"
+    Invoke-WebRequest -Uri $url -OutFile $installerPath
+
+    # Esegui l'installer in modalità silenziosa
+    Write-Host "Installando $installerName"
+    Start-Process $installerPath -ArgumentList '/S' -Wait
+
+    # Rimuovi l'installer dopo l'installazione
+    Remove-Item $installerPath
+}
+
+# Funzione per ottenere l'ultima versione di Notepad++ da GitHub
+function Get-LatestNotepadPlusPlusUrl {
+    $apiUrl = "https://api.github.com/repos/notepad-plus-plus/notepad-plus-plus/releases/latest"
+    $latestRelease = Invoke-RestMethod -Uri $apiUrl -UseBasicParsing
+
+    # Cerca il link dell'installer a 64-bit (puoi cambiarlo se ti serve la versione a 32-bit)
+    $installerAsset = $latestRelease.assets | Where-Object { $_.name -like "*Installer.x64.exe" }
+
+    return $installerAsset.browser_download_url
+}
+
+# Installazione 7-Zip (controllo e installazione)
+$sevenZipUrl = "https://www.7-zip.org/a/7z2301-x64.exe"
+Install-Software -url $sevenZipUrl -installerName "7zip_installer.exe" -softwareName "7-Zip" -exePaths @("C:\Program Files\7-Zip\7zFM.exe")
+
+# Installazione Notepad++ (ultima versione da GitHub, controllo e installazione)
+$notepadPlusPlusUrl = Get-LatestNotepadPlusPlusUrl
+Install-Software -url $notepadPlusPlusUrl -installerName "notepadpp_installer.exe" -softwareName "Notepad++" -exePaths @("C:\Program Files\Notepad++\notepad++.exe")
+
+# Installazione Google Chrome (controllo e installazione)
+$chromeUrl = "https://dl.google.com/chrome/install/latest/chrome_installer.exe"
+$chromeExePaths = @(
+    "C:\Program Files\Google\Chrome\Application\chrome.exe",  # Installazione a livello di sistema
+    "$env:LOCALAPPDATA\Google\Chrome\Application\chrome.exe"  # Installazione a livello utente
+)
+Install-Software -url $chromeUrl -installerName "chrome_installer.exe" -softwareName "Google Chrome" -exePaths $chromeExePaths
+
+Write-Host "Installazione completata!"
